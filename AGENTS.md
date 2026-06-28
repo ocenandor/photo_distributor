@@ -43,6 +43,10 @@ photos into output folders.
 ## Current Decisions
 
 - The first version is a local prototype without a web UI.
+- The service entry point lives in `src/main.py`.
+- Yandex Disk operations live in the `src/yandex_disk` module.
+- Local environment variables are loaded from `.env`; keep real tokens out of
+  git.
 - Yandex Forms answers are read from a local export file.
 - Reference photos are stored in a local folder.
 - The shared Yandex Disk event folder contains event photos, not form exports.
