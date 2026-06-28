@@ -23,3 +23,7 @@ def test_delete_test_subfolder(
     yandex_client.delete_resource(disk_test_paths.test_folder, permanently=True)
     wait_for_resource_state(yandex_client, disk_test_paths.test_folder, exists=False)
     assert yandex_client.resource_exists(disk_test_paths.copy_source_file)
+
+    if disk_test_paths.downloaded_file.exists():
+        disk_test_paths.downloaded_file.unlink()
+    assert not disk_test_paths.downloaded_file.exists()

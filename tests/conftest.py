@@ -52,6 +52,7 @@ def disk_test_paths(yandex_folder: str, project_root: Path) -> DiskTestPaths:
         copy_source_file=join_disk_path(yandex_folder, TEST_COPY_FILE_NAME),
         copy_destination_file=join_disk_path(test_folder, TEST_COPY_FILE_NAME),
         local_file=project_root / "tests" / TEST_FILE_NAME,
+        downloaded_file=project_root / "tests" / "downloads" / TEST_COPY_FILE_NAME,
     )
 
 

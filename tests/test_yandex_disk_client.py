@@ -7,7 +7,7 @@ Run from the repository root:
 
 The tests use `YANDEX_DISK_TOKEN` from `.env`, create
 `/test_event_folder/test` by default, upload `tests/client_upload_test.txt`,
-and verify copied files.
+and verify copied/downloaded files.
 """
 
 from __future__ import annotations
@@ -70,3 +70,20 @@ def test_copy_disk_file_to_test_subfolder(
         exists=True,
     )
     assert yandex_client.resource_exists(disk_test_paths.copy_source_file)
+
+
+def test_download_disk_file_to_local_disk(
+    yandex_client: Any,
+    disk_test_paths: DiskTestPaths,
+) -> None:
+    assert yandex_client.resource_exists(disk_test_paths.copy_source_file)
+
+    downloaded_file = yandex_client.download_file(
+        disk_test_paths.copy_source_file,
+        disk_test_paths.downloaded_file,
+        overwrite=True,
+    )
+
+    assert downloaded_file == disk_test_paths.downloaded_file
+    assert downloaded_file.is_file()
+    assert downloaded_file.stat().st_size > 0

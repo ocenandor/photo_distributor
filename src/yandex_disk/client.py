@@ -136,6 +136,36 @@ class YandexDiskClient:
         except URLError as exc:
             raise DiskApiError(f"upload failed: {exc.reason}") from exc
 
+    def download_file(
+        self,
+        disk_path: str,
+        local_path: str | Path,
+        *,
+        overwrite: bool = False,
+    ) -> Path:
+        """Download a Yandex Disk file to a local path."""
+
+        path = Path(local_path)
+        if path.exists() and not overwrite:
+            raise ValueError(f"Local file already exists: {path}")
+
+        download_info = self._request("GET", "/resources/download", {"path": disk_path})
+        href = download_info.get("href")
+        if not isinstance(href, str) or not href:
+            raise DiskApiError("Download link response does not contain href.")
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        request = Request(href, method="GET")
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                path.write_bytes(response.read())
+        except HTTPError as exc:
+            raise DiskApiError(self._format_http_error(exc), exc.code) from exc
+        except URLError as exc:
+            raise DiskApiError(f"download failed: {exc.reason}") from exc
+
+        return path
+
     def delete_resource(self, path: str, *, permanently: bool = False) -> JsonObject:
         """Delete a Yandex Disk resource."""
 

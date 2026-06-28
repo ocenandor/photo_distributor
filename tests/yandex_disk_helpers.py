@@ -23,6 +23,7 @@ class DiskTestPaths:
     copy_source_file: str
     copy_destination_file: str
     local_file: Path
+    downloaded_file: Path
 
 
 def join_disk_path(parent: str, child: str) -> str:
