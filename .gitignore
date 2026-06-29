@@ -6,3 +6,4 @@ __pycache__/
 .vscode
 tests/downloads/
 data/
+quality_lab/data/
