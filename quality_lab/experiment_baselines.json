@@ -1,0 +1,25 @@
+{
+  "production_like_baseline": {
+    "run_id": "sface_baseline",
+    "recognizer": "sface",
+    "detector": "yunet",
+    "detection_threshold": 0.6,
+    "match_threshold": 0.45,
+    "derived_references": false
+  },
+  "derived_reference_lab_baseline": {
+    "run_id": "sface_derived_0_50_det_0_75",
+    "source_run_id": "sface_baseline",
+    "recognizer": "sface",
+    "detector": "yunet",
+    "detection_threshold": 0.6,
+    "report_match_threshold": 0.35,
+    "derived_references": true,
+    "derived_min_score": 0.5,
+    "derived_min_detection_score": 0.75,
+    "derived_min_box_height_ratio": 0.12,
+    "derived_min_box_area_ratio": 0.01,
+    "derived_max_per_person": 4,
+    "production_enabled": false
+  }
+}
