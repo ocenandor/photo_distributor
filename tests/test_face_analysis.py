@@ -10,6 +10,12 @@ import pytest
 from face_analysis import FaceAnalysisError, FaceAnalyzer, FaceDetection, YuNetConfig
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_YUNET_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "face_detection_yunet_2023mar.onnx"
+DEFAULT_SFACE_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "face_recognition_sface_2021dec.onnx"
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
 def test_yunet_default_score_threshold_is_selected_from_manual_probe() -> None:
     assert YuNetConfig().score_threshold == 0.6
 
@@ -40,22 +46,55 @@ def test_embed_requires_recognizer_model_path() -> None:
         analyzer.embed("tests/mock_faces/person.jpg", detections=[])
 
 
-@pytest.mark.skipif(
-    not all(
-        os.environ.get(name)
-        for name in ("YUNET_MODEL_PATH", "SFACE_MODEL_PATH", "FACE_TEST_IMAGE")
-    ),
-    reason="Set YUNET_MODEL_PATH, SFACE_MODEL_PATH, and FACE_TEST_IMAGE to run the OpenCV integration test.",
-)
 def test_detects_faces_and_extracts_embeddings_from_real_image() -> None:
-    analyzer = FaceAnalyzer(
-        Path(os.environ["YUNET_MODEL_PATH"]),
-        Path(os.environ["SFACE_MODEL_PATH"]),
-    )
+    detector_model_path = _model_path("YUNET_MODEL_PATH", DEFAULT_YUNET_MODEL_PATH)
+    recognizer_model_path = _model_path("SFACE_MODEL_PATH", DEFAULT_SFACE_MODEL_PATH)
+    analyzer = FaceAnalyzer(detector_model_path, recognizer_model_path)
 
-    detections = analyzer.detect(Path(os.environ["FACE_TEST_IMAGE"]))
-    embeddings = analyzer.embed(Path(os.environ["FACE_TEST_IMAGE"]), detections)
+    image_path, detections = _first_image_with_detections(analyzer)
+    embeddings = analyzer.embed(image_path, detections)
 
     assert detections
     assert len(embeddings) == len(detections)
     assert all(embedding.vector for embedding in embeddings)
+
+
+def _model_path(env_name: str, default_path: Path) -> Path:
+    path = Path(os.environ.get(env_name, default_path))
+    if not path.is_file():
+        pytest.skip(f"Set {env_name} or add model file: {default_path}")
+    return path
+
+
+def _first_image_with_detections(
+    analyzer: FaceAnalyzer,
+) -> tuple[Path, list[FaceDetection]]:
+    for image_path in _candidate_images():
+        detections = analyzer.detect(image_path)
+        if detections:
+            return image_path, detections
+
+    pytest.skip("Set FACE_TEST_IMAGE or add a local image with a detectable face.")
+
+
+def _candidate_images() -> list[Path]:
+    configured = os.environ.get("FACE_TEST_IMAGE")
+    if configured:
+        return [Path(configured)]
+
+    image_roots = (
+        PROJECT_ROOT / "quality_lab" / "data" / "images",
+        PROJECT_ROOT / "data" / "event_photos",
+    )
+    images: list[Path] = []
+    for root in image_roots:
+        if not root.is_dir():
+            continue
+        images.extend(
+            sorted(
+                path
+                for path in root.rglob("*")
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+            )
+        )
+    return images

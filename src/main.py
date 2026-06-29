@@ -73,9 +73,6 @@ def main(argv: list[str] | None = None) -> int:
                 similarity_threshold=args.similarity_threshold,
             ),
         )
-    except ValueError as exc:
-        _print_error("Configuration error", exc)
-        return 2
     except FormsExportError as exc:
         _print_error("Forms export error", exc)
         return 1
@@ -85,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     except DiskApiError as exc:
         _print_error("Yandex Disk API error", exc)
         return 1
+    except ValueError as exc:
+        _print_error("Configuration error", exc)
+        return 2
 
     print("Distribution complete.")
     print(f"Participants: {result.participants_count}")
