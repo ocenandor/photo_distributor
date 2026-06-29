@@ -175,24 +175,55 @@ class YandexDiskClient:
             {"path": path, "permanently": str(permanently).lower()},
         )
 
+    def publish_resource(
+        self,
+        path: str,
+        *,
+        emails: list[str] | None = None,
+        rights: str = "read",
+    ) -> JsonObject:
+        """Publish a resource and optionally grant personal access by email."""
+
+        body: JsonObject = {"public_settings": {}}
+        params: dict[str, str | int] = {"path": path}
+        if emails:
+            params["allow_address_access"] = "true"
+            body["public_settings"] = {
+                "accesses": [
+                    {
+                        "emails": emails,
+                        "rights": [rights],
+                    }
+                ]
+            }
+
+        return self._request("PUT", "/resources/publish", params, json_body=body)
+
     def _request(
         self,
         method: str,
         endpoint: str,
         params: dict[str, str | int] | None = None,
+        json_body: JsonObject | None = None,
     ) -> JsonObject:
         query = urlencode(params or {})
         url = f"{self.base_url}{endpoint}"
         if query:
             url = f"{url}?{query}"
+        data = None
+        headers = {
+            "Authorization": f"OAuth {self.token}",
+            "Accept": "application/json",
+        }
+        if json_body is not None:
+            data = json.dumps(json_body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
 
         request = Request(
             url,
             method=method,
-            headers={
-                "Authorization": f"OAuth {self.token}",
-                "Accept": "application/json",
-            },
+            data=data,
+            headers=headers,
         )
 
         try:
