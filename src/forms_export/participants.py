@@ -132,7 +132,7 @@ def _normalize_disk_path(value: str) -> str:
     if value.startswith("/"):
         return value
 
-    raise FormsExportError(f"Unsupported image path format: {value}")
+    raise FormsExportError("Unsupported image path format in images field.")
 
 
 def _path_from_disk_ui_path(value: str) -> str:
@@ -142,7 +142,7 @@ def _path_from_disk_ui_path(value: str) -> str:
         return "/" + value.removeprefix("/disk/")
     if value.startswith("/"):
         return value
-    raise FormsExportError(f"Unsupported Yandex Disk UI path: {value}")
+    raise FormsExportError("Unsupported Yandex Disk UI path in images field.")
 
 
 def _validate_unique_emails(participants: list[Participant]) -> None:
@@ -155,5 +155,4 @@ def _validate_unique_emails(participants: list[Participant]) -> None:
         seen.add(participant.email)
 
     if duplicates:
-        duplicate_text = ", ".join(sorted(duplicates))
-        raise FormsExportError(f"Duplicate email values: {duplicate_text}")
+        raise FormsExportError("Duplicate email values in forms export.")

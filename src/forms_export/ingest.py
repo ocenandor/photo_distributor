@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -90,8 +89,8 @@ def _download_reference_images(
     references_dir: Path,
 ) -> dict[str, list[Path]]:
     downloaded: dict[str, list[Path]] = {}
-    for participant in participants:
-        participant_dir = references_dir / _safe_file_part(participant.email)
+    for participant_index, participant in enumerate(participants, start=1):
+        participant_dir = references_dir / f"participant_{participant_index:03d}"
         participant_dir.mkdir(parents=True, exist_ok=True)
         downloaded[participant.email] = []
 
@@ -113,6 +112,7 @@ def _write_database(
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         _create_schema(connection)
+        _delete_participants_missing_from_export(connection, participants)
 
         for participant in participants:
             connection.execute(
@@ -151,6 +151,22 @@ def _write_database(
                 )
 
 
+def _delete_participants_missing_from_export(
+    connection: sqlite3.Connection,
+    participants: list[Participant],
+) -> None:
+    emails = [participant.email for participant in participants]
+    if not emails:
+        connection.execute("DELETE FROM participants")
+        return
+
+    placeholders = ", ".join("?" for _ in emails)
+    connection.execute(
+        f"DELETE FROM participants WHERE email NOT IN ({placeholders})",
+        emails,
+    )
+
+
 def _create_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
@@ -183,6 +199,3 @@ def _resource_sort_key(resource: dict[str, object]) -> str:
 def _join_disk_path(parent: str, child: str) -> str:
     return f"{parent.rstrip('/')}/{child.lstrip('/')}"
 
-
-def _safe_file_part(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "participant"
