@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from dotenv import load_dotenv
 
 from yandex_disk_helpers import (
     TEST_COPY_FILE_NAME,
@@ -21,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 DEFAULT_YANDEX_FOLDER = "/test_event_folder"
 sys.path.insert(0, str(SRC_DIR))
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

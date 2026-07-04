@@ -5,6 +5,7 @@ description = "Local prototype for distributing event photos by recognized parti
 readme = "AGENTS.md"
 requires-python = ">=3.11"
 dependencies = [
+    "loguru>=0.7.3",
     "opencv-python>=4.10.0",
     "python-dotenv>=1.0.0",
 ]

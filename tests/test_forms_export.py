@@ -7,7 +7,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from forms_export import find_latest_json_export, load_participants
+import pytest
+
+from forms_export import FormsExportError, find_latest_json_export, ingest_forms_export, load_participants
 
 
 TEST_FORM_ID = "test_form"
@@ -73,3 +75,83 @@ def test_downloads_latest_forms_json_and_loads_participant(
         assert participants[0].email == expected_email
     if expected_image_path:
         assert participants[0].image_disk_paths == (expected_image_path,)
+
+
+def test_find_latest_json_export_reports_domain_error_for_missing_export() -> None:
+    client = _FakeFormsDiskClient(files=[])
+
+    with pytest.raises(FormsExportError) as error_info:
+        find_latest_json_export(client, TEST_FORMS_FOLDER)
+
+    assert error_info.value.safe_message() == "No JSON export files found in the Yandex Forms folder."
+
+
+def test_ingest_forms_export_returns_runtime_state_without_database(tmp_path: Path) -> None:
+    client = _FakeFormsDiskClient(
+        files=[
+            {
+                "type": "file",
+                "name": "forms-export.json",
+                "path": f"disk:{TEST_FORMS_FOLDER}/forms-export.json",
+                "created": "2026-06-28T18:38:40+03:00",
+            }
+        ]
+    )
+
+    result = ingest_forms_export(client, TEST_FORM_ID, data_dir=tmp_path / "forms")
+
+    assert result.participants_count == 1
+    assert result.reference_images_count == 1
+    assert result.local_json_path.is_file()
+    assert len(result.participants) == 1
+    participant = result.participants[0]
+    assert participant.id == 1
+    assert participant.name == EXPECTED_NAME
+    assert participant.email == EXPECTED_EMAIL
+    assert participant.policy_accepted is True
+    assert len(participant.reference_images) == 1
+    reference_image = participant.reference_images[0]
+    assert reference_image.id == 1
+    assert reference_image.participant_id == participant.id
+    assert reference_image.disk_path == EXPECTED_IMAGE_PATH
+    assert reference_image.local_path.is_file()
+    assert result.reference_images == (reference_image,)
+    assert not (tmp_path / "photo_distributor.sqlite3").exists()
+
+
+class _FakeFormsDiskClient:
+    """Small test double for forms export folder listing."""
+
+    def __init__(self, files: list[dict[str, object]]) -> None:
+        self.files = files
+
+    def list_files(self, path: str) -> list[dict[str, object]]:
+        assert path == TEST_FORMS_FOLDER
+        return self.files
+
+    def download_file(self, disk_path: str, local_path: Path, *, overwrite: bool = False) -> Path:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        if disk_path.endswith("forms-export.json"):
+            local_path.write_text(_forms_export_json(), encoding="utf-8")
+        elif disk_path == EXPECTED_IMAGE_PATH:
+            local_path.write_text("reference image", encoding="utf-8")
+        else:
+            raise AssertionError(f"Unexpected download path: {disk_path}")
+        return local_path
+
+
+def _forms_export_json() -> str:
+    """Return one fake Yandex Forms JSON export."""
+
+    return json.dumps(
+        [
+            [
+                ["ID", "answer-1"],
+                ["Created", "2026-06-28 18:38:40"],
+                ["Policy", "\u0414\u0430"],
+                ["Display name", EXPECTED_NAME],
+                ["Email", EXPECTED_EMAIL],
+                ["Reference images", EXPECTED_IMAGE_URL],
+            ]
+        ]
+    )

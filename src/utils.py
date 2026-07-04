@@ -1,4 +1,4 @@
-"""Helpers for keeping console output free of personal data."""
+"""Shared utility helpers for service diagnostics."""
 
 from __future__ import annotations
 
@@ -10,7 +10,14 @@ OAUTH_PATTERN = re.compile(r"\bOAuth\s+[A-Za-z0-9._~+/=-]+\b")
 
 
 def redact_personal_data(value: object) -> str:
-    """Return a string safe enough for console diagnostics."""
+    """Return a conservatively redacted logging/diagnostic string.
+
+    Args:
+        value: Diagnostic value that may contain personal data or credentials.
+
+    Returns:
+        Text with obvious email addresses and OAuth token strings replaced.
+    """
 
     text = str(value)
     text = EMAIL_PATTERN.sub("<email>", text)

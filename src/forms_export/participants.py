@@ -7,16 +7,39 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from utils import redact_personal_data
+
 from .schema import FORM_FIELD_ORDER, MAX_REFERENCE_IMAGES, TRUTHY_POLICY_VALUES
 
 
 class FormsExportError(ValueError):
     """Raised when the local forms export is missing required data."""
 
+    def __init__(self, message: str, *, safe_message: str | None = None) -> None:
+        """Create a forms-export error with an optional log-safe message."""
+
+        super().__init__(message)
+        self._safe_message = safe_message
+
+    def safe_message(self) -> str:
+        """Return a message safe for logs and console diagnostics."""
+
+        if self._safe_message is not None:
+            return self._safe_message
+        return redact_personal_data(self)
+
 
 @dataclass(frozen=True)
 class Participant:
-    """A participant imported from the local Yandex Forms JSON export."""
+    """A participant imported from the local Yandex Forms JSON export.
+
+    Attributes:
+        policy_accepted: Whether the participant accepted the consent policy.
+        name: Display name from the form, later used for output folder naming.
+        email: Yandex email from the form. It is trusted as form-validated and
+            should not be printed in diagnostics.
+        image_disk_paths: One to three Yandex Disk paths for reference photos.
+    """
 
     policy_accepted: bool
     name: str
@@ -25,16 +48,33 @@ class Participant:
 
 
 def load_participants(json_path: str | Path) -> list[Participant]:
-    """Load participants from a manually exported Yandex Forms JSON file."""
+    """Load participants from a manually exported Yandex Forms JSON file.
+
+    Args:
+        json_path: Local path to the downloaded JSON export.
+
+    Returns:
+        Parsed participants in export order.
+
+    Raises:
+        FormsExportError: If the file is missing, invalid, empty, duplicated by
+            email, or does not match the expected positional form shape.
+    """
 
     path = Path(json_path)
     if not path.is_file():
-        raise FormsExportError(f"Forms JSON export does not exist: {path}")
+        raise FormsExportError(
+            f"Forms JSON export does not exist: {path}",
+            safe_message="Forms JSON export does not exist.",
+        )
 
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
-        raise FormsExportError(f"Forms JSON export is invalid: {path}") from exc
+        raise FormsExportError(
+            f"Forms JSON export is invalid: {path}",
+            safe_message="Forms JSON export is invalid.",
+        ) from exc
 
     if not isinstance(data, list):
         raise FormsExportError("Forms JSON export must contain a list of answers.")
@@ -44,13 +84,18 @@ def load_participants(json_path: str | Path) -> list[Participant]:
         for index, answer in enumerate(data, start=1)
     ]
     if not participants:
-        raise FormsExportError(f"Forms JSON export is empty: {path}")
+        raise FormsExportError(
+            f"Forms JSON export is empty: {path}",
+            safe_message="Forms JSON export is empty.",
+        )
 
     _validate_unique_emails(participants)
     return participants
 
 
 def _parse_answer(answer: object, *, answer_number: int) -> Participant:
+    """Parse one exported answer using positional field order."""
+
     values = _extract_answer_values(answer)
     if len(values) < len(FORM_FIELD_ORDER):
         raise FormsExportError(
@@ -76,6 +121,8 @@ def _parse_answer(answer: object, *, answer_number: int) -> Participant:
 
 
 def _extract_answer_values(answer: object) -> list[str]:
+    """Extract raw answer values while ignoring mutable question text."""
+
     if not isinstance(answer, list):
         raise FormsExportError("Each answer must be a list of question/value pairs.")
 
@@ -89,6 +136,8 @@ def _extract_answer_values(answer: object) -> list[str]:
 
 
 def _required_value(value: str, field: str, answer_number: int) -> str:
+    """Return a stripped required value or raise a forms export error."""
+
     stripped = value.strip()
     if not stripped:
         raise FormsExportError(f"Answer {answer_number} is missing required field: {field}")
@@ -96,10 +145,14 @@ def _required_value(value: str, field: str, answer_number: int) -> str:
 
 
 def _parse_policy(value: str) -> bool:
+    """Convert the policy answer into a boolean acceptance flag."""
+
     return value.strip().lower() in TRUTHY_POLICY_VALUES
 
 
 def _parse_image_disk_paths(value: str, answer_number: int) -> tuple[str, ...]:
+    """Parse one to three reference image paths from the form answer."""
+
     normalized = value.replace("\r\n", "\n").replace("\r", "\n")
     for separator in ("\n", ";", "|"):
         normalized = normalized.replace(separator, ",")
@@ -119,6 +172,8 @@ def _parse_image_disk_paths(value: str, answer_number: int) -> tuple[str, ...]:
 
 
 def _normalize_disk_path(value: str) -> str:
+    """Normalize Yandex Disk UI links, `disk:` paths, and absolute disk paths."""
+
     parsed = urlparse(value)
     if parsed.scheme in {"http", "https"} and parsed.netloc.endswith("disk.yandex.ru"):
         query = parse_qs(parsed.query)
@@ -136,6 +191,8 @@ def _normalize_disk_path(value: str) -> str:
 
 
 def _path_from_disk_ui_path(value: str) -> str:
+    """Extract an absolute disk path from a Yandex Disk UI path fragment."""
+
     if value.startswith("/client/disk/"):
         return "/" + value.removeprefix("/client/disk/")
     if value.startswith("/disk/"):
@@ -146,6 +203,8 @@ def _path_from_disk_ui_path(value: str) -> str:
 
 
 def _validate_unique_emails(participants: list[Participant]) -> None:
+    """Reject exports that contain more than one answer for the same email."""
+
     seen: set[str] = set()
     duplicates: set[str] = set()
 
