@@ -13,6 +13,9 @@ from forms_export import ImportedParticipant
 from .cloud_files import EventPhotoRecord
 
 
+OUTPUT_FOLDER_SUFFIX = "__output"
+
+
 @dataclass(frozen=True)
 class DistributionOutputFolders:
     """Output folder names for one distribution run.
@@ -202,7 +205,7 @@ def _participant_output_folder_names(participants: list[ImportedParticipant]) ->
             suffix += 1
 
         used.add(candidate.lower())
-        result[participant.id] = candidate
+        result[participant.id] = f"{candidate}{OUTPUT_FOLDER_SUFFIX}"
     return result
 
 

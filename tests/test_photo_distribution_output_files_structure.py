@@ -31,9 +31,9 @@ def test_build_distribution_output_folders_returns_safe_unique_names() -> None:
     )
 
     assert result.participant_folders_by_id == {
-        1: "Participant",
-        2: "Participant_2",
-        3: "Bad_Name",
+        1: "Participant__output",
+        2: "Participant_2__output",
+        3: "Bad_Name__output",
     }
     assert result.quarantine_folder_name == "quarantine"
 
@@ -48,8 +48,8 @@ def test_build_distribution_output_folders_falls_back_to_email_or_id() -> None:
     )
 
     assert result.participant_folders_by_id == {
-        1: "first",
-        2: "participant_2",
+        1: "first__output",
+        2: "participant_2__output",
     }
 
 
@@ -90,7 +90,7 @@ def test_build_distribution_copy_plan_creates_participant_and_quarantine_records
         (plan.destination_kind, plan.source_disk_path, plan.destination_disk_path)
         for plan in result.copy_plan
     ] == [
-        ("participant", "/event/matched.jpg", "/event/Participant/matched.jpg"),
+        ("participant", "/event/matched.jpg", "/event/Participant__output/matched.jpg"),
         ("quarantine", "/event/quarantine.jpg", "/event/quarantine/quarantine.jpg"),
     ]
 
@@ -144,6 +144,6 @@ def _output_folders() -> DistributionOutputFolders:
     """Return output folder names for copy-plan tests."""
 
     return DistributionOutputFolders(
-        participant_folders_by_id={1: "Participant"},
+        participant_folders_by_id={1: "Participant__output"},
         quarantine_folder_name="quarantine",
     )

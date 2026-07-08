@@ -9,12 +9,12 @@ import numpy as np
 import pytest
 
 from face_analysis import EmbeddingReference, FaceAnalysisError, FaceAnalyzer, FaceDetection, YuNetConfig
+from photo_distribution_utils.image_files import IMAGE_EXTENSIONS
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_YUNET_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "face_detection_yunet_2023mar.onnx"
 DEFAULT_SFACE_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "face_recognition_sface_2021dec.onnx"
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def test_yunet_default_score_threshold_is_selected_from_manual_probe() -> None:

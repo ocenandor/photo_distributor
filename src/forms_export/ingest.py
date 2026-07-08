@@ -2,83 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
-from yandex_disk import YandexDiskClient
+from loguru import logger
+from yandex_disk import DiskApiError, YandexDiskClient
 
+from .contracts import FormsIngestResult, ImportedParticipant, ImportedReferenceImage
 from .participants import FormsExportError, Participant, load_participants
 
 
 DEFAULT_FORMS_FOLDER = "/Yandex.Forms"
 DEFAULT_DATA_DIR = Path("data/forms")
-
-
-@dataclass(frozen=True)
-class ImportedReferenceImage:
-    """Reference image downloaded for one imported participant.
-
-    Attributes:
-        id: Run-local reference image id.
-        participant_id: Run-local participant id that owns this reference.
-        disk_path: Original Yandex Disk path of the reference image.
-        local_path: Local downloaded file path used by face analysis.
-    """
-
-    id: int
-    participant_id: int
-    disk_path: str
-    local_path: Path
-
-
-@dataclass(frozen=True)
-class ImportedParticipant:
-    """Participant imported from the latest Yandex Forms export.
-
-    Attributes:
-        id: Run-local participant id assigned in export order.
-        email: Participant email from the form. Keep it out of logs.
-        name: Display name from the form, used for output folders.
-        policy_accepted: Consent value parsed from the form.
-        reference_images: Downloaded reference images submitted by this
-            participant.
-    """
-
-    id: int
-    email: str
-    name: str
-    policy_accepted: bool
-    reference_images: tuple[ImportedReferenceImage, ...]
-
-
-@dataclass(frozen=True)
-class FormsIngestResult:
-    """Summary of one Yandex Forms export import.
-
-    Attributes:
-        json_disk_path: Yandex Disk path of the selected newest export file.
-        local_json_path: Local downloaded copy of that JSON export.
-        participants: Participants and reference images imported from the
-            current export.
-        participants_count: Number of participants parsed from the export.
-        reference_images_count: Number of reference images downloaded locally.
-    """
-
-    json_disk_path: str
-    local_json_path: Path
-    participants: tuple[ImportedParticipant, ...]
-    participants_count: int
-    reference_images_count: int
-
-    @property
-    def reference_images(self) -> tuple[ImportedReferenceImage, ...]:
-        """Return all imported reference images in participant/export order."""
-
-        return tuple(
-            reference_image
-            for participant in self.participants
-            for reference_image in participant.reference_images
-        )
 
 
 def ingest_forms_export(
@@ -175,7 +109,11 @@ def _download_reference_images(
             suffix = Path(disk_path).suffix
             local_name = f"{index:02d}{suffix}" if suffix else f"{index:02d}"
             local_path = participant_dir / local_name
-            disk_client.download_file(disk_path, local_path, overwrite=True)
+            try:
+                disk_client.download_file(disk_path, local_path, overwrite=True)
+            except DiskApiError:
+                logger.warning("Reference image from JSON export skipped: Disk resource is unavailable.")
+                continue
             reference_images.append(
                 ImportedReferenceImage(
                     id=reference_id,
@@ -185,6 +123,9 @@ def _download_reference_images(
                 )
             )
             reference_id += 1
+        if not reference_images:
+            logger.warning("Participant from JSON export skipped: no reference images were downloaded.")
+            continue
         imported_participants.append(
             ImportedParticipant(
                 id=participant_index,

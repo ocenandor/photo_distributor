@@ -57,8 +57,8 @@ def load_participants(json_path: str | Path) -> list[Participant]:
         Parsed participants in export order.
 
     Raises:
-        FormsExportError: If the file is missing, invalid, empty, duplicated by
-            email, or does not match the expected positional form shape.
+        FormsExportError: If the file is missing, invalid, empty, or does not
+            match the expected positional form shape.
     """
 
     path = Path(json_path)
@@ -89,7 +89,6 @@ def load_participants(json_path: str | Path) -> list[Participant]:
             safe_message="Forms JSON export is empty.",
         )
 
-    _validate_unique_emails(participants)
     return participants
 
 
@@ -182,6 +181,12 @@ def _normalize_disk_path(value: str) -> str:
             return _path_from_disk_ui_path(unquote(id_dialog))
         return _path_from_disk_ui_path(unquote(parsed.path))
 
+    if parsed.scheme in {"http", "https"} and parsed.netloc == "forms.yandex.ru":
+        query = parse_qs(parsed.query)
+        uploaded_file_path = query.get("path", [""])[0]
+        if uploaded_file_path:
+            return _path_from_forms_upload_path(unquote(uploaded_file_path))
+
     if value.startswith("disk:"):
         return value.removeprefix("disk:")
     if value.startswith("/"):
@@ -202,16 +207,12 @@ def _path_from_disk_ui_path(value: str) -> str:
     raise FormsExportError("Unsupported Yandex Disk UI path in images field.")
 
 
-def _validate_unique_emails(participants: list[Participant]) -> None:
-    """Reject exports that contain more than one answer for the same email."""
+def _path_from_forms_upload_path(value: str) -> str:
+    """Convert a Yandex Forms uploaded-file URL path into a Disk file path."""
 
-    seen: set[str] = set()
-    duplicates: set[str] = set()
-
-    for participant in participants:
-        if participant.email in seen:
-            duplicates.add(participant.email)
-        seen.add(participant.email)
-
-    if duplicates:
-        raise FormsExportError("Duplicate email values in forms export.")
+    parts = [part for part in value.strip("/").split("/") if part]
+    if len(parts) >= 3:
+        form_id = parts[-2]
+        filename = parts[-1]
+        return f"/Yandex.Forms/{form_id}/{filename}"
+    raise FormsExportError("Unsupported Yandex Forms file path in images field.")

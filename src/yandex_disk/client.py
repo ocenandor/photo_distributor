@@ -330,40 +330,6 @@ class YandexDiskClient:
             {"path": path, "permanently": str(permanently).lower()},
         )
 
-    @retry_yandex_disk_operation
-    def publish_resource(
-        self,
-        path: str,
-        *,
-        emails: list[str] | None = None,
-        rights: str = "read",
-    ) -> JsonObject:
-        """Publish a resource and optionally grant personal access by email.
-
-        Args:
-            path: Absolute Yandex Disk resource path.
-            emails: Optional Yandex accounts that should receive direct access.
-            rights: Access rights to grant, for example `read`.
-
-        Returns:
-            Raw JSON response from Yandex Disk.
-        """
-
-        body: JsonObject = {"public_settings": {}}
-        params: dict[str, str | int] = {"path": path}
-        if emails:
-            params["allow_address_access"] = "true"
-            body["public_settings"] = {
-                "accesses": [
-                    {
-                        "emails": emails,
-                        "rights": [rights],
-                    }
-                ]
-            }
-
-        return self._request("PUT", "/resources/publish", params, json_body=body)
-
     def _request(
         self,
         method: str,

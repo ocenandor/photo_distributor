@@ -6,10 +6,10 @@ Build a local Python prototype that distributes event photos from a shared
 Yandex Disk folder into per-person folders.
 
 Participants submit consent, display name, email, and one to three reference
-photos through Yandex Forms. In the current prototype the form export is placed
-under `/Yandex.Forms/<form_id>/` on Yandex Disk, then imported by the local
-workflow. Reference photos and event photos are downloaded locally only as
-workflow artifacts.
+photos through Yandex Forms. The live prototype imports Yandex Forms answer
+emails from the mail folder `Yandex.Forms` and can also consume the optional
+JSON export folder on Yandex Disk. Both sources must normalize to the same
+imported-forms contract before downstream processing.
 
 Face detection and recognition run locally with OpenCV YuNet and SFace. The
 service copies original event photos on Yandex Disk into output folders. It must
@@ -18,25 +18,32 @@ not move or delete original event photos.
 The current production command is:
 
 ```powershell
-python src/main.py <event_folder> <form_id>
+python src/start_event.py <form_id> [cloud_event_folder]
 ```
 
 ## 2. Architecture Decisions
 
 ### 2.1. Module Ownership
 
-- `src/main.py` is the CLI and logging boundary only.
-- Runtime service construction, including `YandexDiskClient.from_env()`, lives
-  in `src/photo_distribution_utils/workflow.py`.
+- `src/start_event.py` is the production CLI and logging boundary only.
+- Runtime service construction and live orchestration live in
+  `src/photo_distribution_utils/live_workflow.py`.
 - Yandex Disk API operations live in `src/yandex_disk`.
+- Yandex Disk UI automation for participant write-access grants lives in
+  `src/yandex_disk/ui_access_grantor.py` and must stay outside
+  `YandexDiskClient`.
+- IMAP/SMTP transport operations live in `src/mail_client`.
 - Local Yandex Forms export parsing and reference download live in
   `src/forms_export`.
+- Email answer parsing and attachment normalization live in
+  `src/forms_export/email_answers.py`.
 - Low-level face detection, embedding extraction, and distribution face-analysis
   orchestration live in `src/face_analysis`.
 - Face-embedding matching decisions live behind `FaceAnalyzer.match_embedding()`;
   do not reintroduce a separate production `face_matching` module unless the
   production matching boundary is explicitly redesigned.
-- End-to-end distribution workflow lives in `src/photo_distribution_utils`.
+- End-to-end live distribution workflow lives in
+  `src/photo_distribution_utils/live_workflow.py`.
 - Yandex Disk event folder validation and source event photo downloading live
   in `src/photo_distribution_utils/cloud_files.py`.
 - Local artifact path derivation lives in
@@ -59,31 +66,56 @@ The current workflow is described in `PIPELINE.md`. Update `PIPELINE.md` when
 module ownership, call order, workflow inputs, workflow outputs, local artifacts,
 or Yandex Disk side effects change.
 
-The production flow is:
+The production live flow is:
 
-1. `main` parses CLI arguments and configures logging.
-2. `workflow.run_distribution(...)` creates runtime services.
-3. The event folder path is validated as an already-normalized absolute Yandex
-   Disk path.
-4. Local artifact paths for the current event are created after event-folder
-   validation.
-5. Forms export and reference photos are imported from `/Yandex.Forms/<form_id>/`.
-6. Event photos are downloaded from the event folder.
-7. The workflow builds output folder names for participants and quarantine.
-8. `FaceAnalyzer` computes reference embeddings, event detections, event
-   embeddings, and matches.
-9. The workflow builds and persists `copy_plan.json`.
-10. The workflow creates participant folders and `quarantine` on Yandex Disk.
-11. The workflow applies the copy plan with remote-to-remote Yandex Disk copies.
-12. `main` logs only a safe result summary.
+1. `start_event` parses CLI arguments and configures logging.
+2. `live_workflow.run_live_event(...)` creates `YandexDiskClient` and
+   `MailClient`, plus the Yandex Disk UI access grantor.
+3. The workflow accepts an already-canonical optional cloud event folder path,
+   or generates one when omitted, creates it with
+   `YandexDiskClient.ensure_folder(...)`, and validates that it exists.
+4. The workflow prepares local artifact paths for this live event.
+5. The workflow polls email answers from the configured forms mail folder.
+6. The workflow also checks optional `/Yandex.Forms/<form_id>/` on Yandex Disk
+   for a newer JSON export. A missing forms folder or missing JSON export is a
+   normal live state.
+7. A temporarily unavailable mail source or invalid/unavailable Disk JSON export
+   is logged safely and retried on later polling loops.
+8. Email answers and JSON exports both normalize to `FormsIngestResult`; the
+   live workflow keeps each accepted answer as a separate participant and keeps
+   all downloaded reference images. Duplicate emails are allowed in the forms
+   contract because two different people may submit references for the same
+   contact email.
+9. For every new participant email from either source, the workflow grants
+   participant write access to the event folder through
+   `src/yandex_disk/ui_access_grantor.py`. A failed grant is logged safely, one
+   operator alert is sent to `MAIL_ADMIN_EMAIL`, and the participant still
+   enters the downstream forms contract so manual access granting by the
+   operator does not block reference ingestion or matching.
+10. If another participant uses an email that already had access handled in the
+   current live run, the workflow skips the repeated UI invite and sends one
+   operator duplicate-email alert.
+11. The workflow incrementally downloads only new readable event photos into
+    the local cache. Unreadable or partially uploaded images are left out of the
+    known-file cache so later event-folder polls retry them.
+12. The workflow runs face analysis, output folder planning, copy-plan creation,
+    and remote copy application.
+13. The workflow runs until `Ctrl+C`.
+
+Live runner polling is split by source family:
+
+- `--form-poll-seconds` controls how often the runner checks both form sources:
+  the forms mail folder and optional `/Yandex.Forms/<form_id>/` JSON export.
+- `--event-poll-seconds` controls how often the runner checks the event photo
+  folder.
 
 Runtime state is passed explicitly between steps. SQLite is not used as hidden
-temporary transport in the main service flow. A future debug/history database
-must be a separate persistence layer, not a dependency of the runtime pipeline.
+temporary transport in the service flow. A future debug/history database must
+be a separate persistence layer, not a dependency of the runtime pipeline.
 
 ### 2.3. Forms Data Contract
 
-Yandex Forms exports are expected on Yandex Disk at:
+JSON Yandex Forms exports are expected on Yandex Disk at:
 
 - `/Yandex.Forms/<form_id>/`
 
@@ -97,9 +129,40 @@ The single source of truth for field order is `FORM_FIELD_ORDER` in
 - `email`
 - `images`
 
-`images` contains one to three Yandex Disk paths or Yandex Disk UI links. Email
-is trusted as already validated by Yandex Forms. The form id is always passed
-explicitly; tests use `test_form` as the Yandex Forms subfolder name.
+`images` contains one to three reference image values. The JSON importer accepts
+absolute Yandex Disk paths, `disk:` paths, Yandex Disk UI links, and
+`https://forms.yandex.ru/u/files?path=...` links. Email is trusted as already
+validated by Yandex Forms. Duplicate email values are allowed in the imported
+forms contract. The form id is always passed explicitly; tests use `test_form`
+as the Yandex Forms subfolder name.
+
+All forms sources must return the shared domain contract from
+`src/forms_export/contracts.py`:
+
+- `ImportedReferenceImage`
+- `ImportedParticipant`
+- `FormsIngestResult`
+
+JSON import and email import must both expose:
+
+- `forms_ingest.participants`
+- `forms_ingest.reference_images`
+- `forms_ingest.participants_count`
+- `forms_ingest.reference_images_count`
+
+Downstream workflow code must not care whether the source was JSON export or
+email answers.
+
+JSON import must skip unavailable reference images from a Disk export instead
+of stopping the live runner. If none of a participant's JSON reference images
+can be downloaded, that participant is skipped from the current imported forms
+result and may enter later through a corrected JSON export or email answer.
+
+Email answers are parsed from subjects shaped as
+`Ответ_на_форму__Название__ID формы__ID ответа`. The email parser reads body
+fields `Accept`, `Name`, and `Email`, parses policy acceptance through
+`TRUTHY_POLICY_VALUES`, and saves up to three attachments as local reference
+images.
 
 ### 2.4. Face Analysis Contract
 
@@ -125,6 +188,8 @@ CLI parsing, or persist workflow state.
 
 - Source photos on Yandex Disk are copied only.
 - Participant folders and `quarantine` are created under the event folder.
+- Participant output folders always use the `__output` suffix, for example
+  `pavel__output` and `pavel_2__output`.
 - If an event photo matches at least one participant, it is copied into every
   matched participant folder.
 - If an event photo matches no participant, it is copied into `quarantine`.
@@ -133,9 +198,31 @@ CLI parsing, or persist workflow state.
 - Idempotent output folder creation goes through
   `YandexDiskClient.ensure_folder(path)`, which treats the Yandex Disk
   "already exists" conflict as success.
-- `YandexDiskClient.publish_resource(path, emails=[...], rights="read")` uses
-  `PUT /resources/publish` with address access enabled. Manual checks live in
-  `scripts/publish_yandex_disk_resource.py`.
+- The live workflow creates the event upload folder through
+  `YandexDiskClient.ensure_folder(...)`.
+- Participant write access is granted through the Yandex Disk UI automation
+  module, because the public Disk API does not reliably create the required
+  shared write-access folder for this product flow.
+- The live UI access flow opens the event folder page, uses the header
+  three-dots menu, chooses `Настроить доступ`, switches `Просмотр` to
+  `Редактирование`, selects the suggested Yandex user for the participant
+  email, and clicks `Пригласить`.
+- A completed invite click is treated as a successful access-grant attempt.
+  The live workflow applies a default 240-second timeout per participant email
+  and sends one `MAIL_ADMIN_EMAIL` alert when manual access granting is needed.
+- The live workflow grants UI access once per participant email in a live run.
+  Later participants with the same email stay in `FormsIngestResult`, skip the
+  repeated UI invite, and trigger one operator duplicate-email alert.
+- A successful access grant sends a participant notification email. A failed
+  access grant does not block the answer from entering `FormsIngestResult`,
+  because the operator can grant Disk access manually after the alert.
+- Failed participant/admin notification emails are logged safely and do not
+  stop the live runner.
+- The Yandex Disk UI automation must keep browser/session artifacts out of logs
+  and commits.
+- The Yandex Disk API publishing helper was removed from `YandexDiskClient`
+  because it is not the product access mechanism for participant write-access
+  folders.
 
 ### 2.6. Quality Lab
 
@@ -151,9 +238,9 @@ experiment.
 
 ### 3.1. Boundaries And Data Flow
 
-- Put domain logic in focused modules, not directly in `src/main.py`.
-- Keep `main` limited to CLI parsing, logging setup, calling workflow, logging
-  safe summaries, and returning process exit codes.
+- Put domain logic in focused modules, not directly in `src/start_event.py`.
+- Keep `start_event` limited to CLI parsing, logging setup, calling workflow,
+  logging safe summaries, and returning process exit codes.
 - Keep top-level packages grouped by real responsibility:
   `yandex_disk` for the remote API client, `forms_export` for imported form
   data, `face_analysis` for local model work, `photo_distribution_utils` for
@@ -161,11 +248,23 @@ experiment.
   shared helpers.
 - Keep Yandex Disk API calls in `src/yandex_disk` or explicit Disk-facing
   workflow modules.
+- Keep browser UI automation separate from API clients. A Yandex Disk UI
+  clicker may grant folder access, but `YandexDiskClient` must remain a pure
+  API client.
 - Keep face detection, embedding extraction, and embedding matching independent
   from forms, persistence, Yandex Disk, and CLI parsing.
 - Keep target cloud file-structure planning, face analysis/matching, copy-plan
   JSON persistence, and Yandex Disk copy application as explicit workflow
   steps.
+- Keep IMAP/SMTP transport separate from Yandex Forms semantics: `mail_client`
+  fetches and sends messages, while `forms_export/email_answers.py` parses
+  form-specific subjects, fields, and attachments.
+- Keep forms adapters interchangeable by making them return
+  `FormsIngestResult`; downstream code must use only the shared contract
+  fields.
+- Treat participant email as an access/notification contact, not as a unique
+  person identity. Do not merge participants by email in recognition or output
+  planning.
 - Keep target output folder naming and target copy-plan construction together
   when they describe one final cloud file structure.
 - Keep validation/downloading of source cloud files together when both concern
@@ -177,7 +276,7 @@ experiment.
   `FaceAnalyzer.analyze_distribution(...)`.
 - Pass runtime state explicitly between workflow steps.
 - Do not use SQLite or another persistence layer as hidden temporary transport
-  inside the main service flow.
+  inside the service flow.
 - Keep any future debug/history database persistence in an explicit persistence
   module, separate from orchestration and runtime state passing.
 
@@ -191,6 +290,10 @@ experiment.
   provides.
 - Validate at boundaries with CLI/user input, external APIs, filesystem state,
   model execution, and imported data.
+- Keep live source checks fail-soft when the source is expected to be
+  temporarily unavailable: mail fetches, optional Disk JSON exports, SMTP
+  notifications, and partially uploaded event photos should log safe diagnostics
+  and allow the next polling loop to retry or continue.
 - Inside our own call graph, prefer required arguments, explicit data objects,
   and simple failure behavior.
 - If a private helper becomes important enough to test directly, move it behind
@@ -299,11 +402,16 @@ Current private service artifacts under `data/`:
 - `data/forms/exports/`: downloaded Yandex Forms JSON exports with participant
   names, emails, consent answers, and reference photo links.
 - `data/forms/references/`: downloaded participant reference photos.
+- `data/forms/email_references/`: reference images saved from live email
+  attachments.
 - `data/event_photos/`: downloaded source event photos.
 - `data/distribution_plans/`: copy-plan JSON artifacts with remote source and
   destination photo paths.
 - `data/logs/photo_distributor.log`: service logs.
+- `data/live_status/live_event_status.json`: overwritten live-runner heartbeat
+  state with event-level counters and timing.
 - `data/models/`: downloaded model files.
+- `data/browser/`: persistent browser profiles for Yandex Disk UI automation.
 - `data/face_probe/`: manual face-probe outputs.
 - `data/mock_faces/`: local scratch fixtures or manual samples.
 
@@ -313,18 +421,15 @@ contact sheets, freeform labeling sessions, CSV reports, and metrics.
 
 ### 4.3. Cleanup And Retention
 
-When `python src/main.py ... --cleanup-local` is used, the workflow removes
-local artifacts listed in `DistributionResult.artifacts.local_artifact_paths`.
-This currently includes:
-
-- `data/forms/`
-- the event-specific folder under `data/event_photos/`
-- the event-specific folder under `data/distribution_plans/`
+When `python src/start_event.py ... --cleanup-local` is used, the live workflow
+removes live local artifacts after the runner stops. This includes the
+event-specific forms data folder, email reference folder, event photo cache
+folder, copy-plan folder, and live status file.
 
 The cleanup routine must refuse to delete paths outside the project `data/`
 folder.
 
-Artifacts intentionally not removed by the main workflow cleanup:
+Artifacts intentionally not removed by live workflow cleanup:
 
 - `data/models/`
 - `data/logs/`

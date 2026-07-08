@@ -17,7 +17,7 @@ from yandex_disk import DiskApiError
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 PRODUCTION_FACING_SCRIPTS = (
-    PROJECT_ROOT / "scripts" / "publish_yandex_disk_resource.py",
+    PROJECT_ROOT / "scripts" / "probe_yandex_disk_ui_access.py",
 )
 PRIVATE_ARTIFACT_ROOTS = (
     ".env",

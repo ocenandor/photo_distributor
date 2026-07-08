@@ -8,7 +8,7 @@ from pathlib import Path
 
 from forms_export.ingest import DEFAULT_DATA_DIR
 from .output_files_structure import CopyPlanRecord, DistributionOutputFolders, join_disk_path
-from yandex_disk import YandexDiskClient
+from yandex_disk import DiskApiError, YandexDiskClient
 
 
 DEFAULT_YUNET_MODEL_PATH = Path("data/models/face_detection_yunet_2023mar.onnx")
@@ -124,7 +124,7 @@ class DistributionArtifacts:
     Attributes:
         copy_plan_path: Local JSON file containing the planned remote Yandex
             Disk copy operations for the run.
-        local_artifact_paths: Local files or directories created by the main
+        local_artifact_paths: Local files or directories created by the
             workflow and eligible for removal by `cleanup_local_artifacts()`.
     """
 
@@ -177,13 +177,16 @@ class DistributionPlanApplyResult:
     Attributes:
         copied_to_disk_count: Number of plan records successfully copied on
             Yandex Disk.
+        removed_from_quarantine_count: Number of stale quarantine copies
+            removed because the same source photo now has a participant match.
     """
 
     copied_to_disk_count: int
+    removed_from_quarantine_count: int = 0
 
 
 def cleanup_local_artifacts(result: DistributionResult) -> None:
-    """Remove local files created by the main distribution workflow.
+    """Remove local files created by the distribution workflow.
 
     Args:
         result: Distribution result containing artifact paths to remove.
@@ -221,9 +224,10 @@ def apply_distribution_plan(
         Count of distribution-plan records successfully copied to Yandex Disk.
 
     Side effects:
-        Creates participant/quarantine folders on Yandex Disk and copies
-        existing remote source photos to remote destination paths. Local
-        downloaded photos are not uploaded.
+        Creates participant/quarantine folders on Yandex Disk, copies existing
+        remote source photos to remote destination paths, and removes stale
+        quarantine copies for photos that are matched to participants in the
+        current plan. Local downloaded photos are not uploaded.
     """
 
     for folder_name in output_folders.participant_folders_by_id.values():
@@ -238,7 +242,84 @@ def apply_distribution_plan(
             overwrite=True,
         )
         copied_count += 1
-    return DistributionPlanApplyResult(copied_to_disk_count=copied_count)
+
+    removed_from_quarantine_count = _remove_stale_quarantine_copies(
+        distribution_plan,
+        disk_client=disk_client,
+        output_folders=output_folders,
+        event_folder=event_folder,
+    )
+    return DistributionPlanApplyResult(
+        copied_to_disk_count=copied_count,
+        removed_from_quarantine_count=removed_from_quarantine_count,
+    )
+
+
+def _remove_stale_quarantine_copies(
+    distribution_plan: tuple[CopyPlanRecord, ...],
+    *,
+    disk_client: YandexDiskClient,
+    output_folders: DistributionOutputFolders,
+    event_folder: str,
+) -> int:
+    """Delete quarantine copies for photos now routed to participant folders.
+
+    Args:
+        distribution_plan: Current planned remote copy operations.
+        disk_client: Yandex Disk client used for remote deletion.
+        output_folders: Current output folder names, including quarantine.
+        event_folder: Yandex Disk event folder containing output folders.
+
+    Returns:
+        Number of stale quarantine copies deleted.
+
+    Side effects:
+        Deletes files from the event quarantine folder on Yandex Disk. Missing
+        files are ignored because the current run may be the first matched run
+        for a photo.
+    """
+
+    participant_photo_names = {
+        _disk_file_name(plan.source_disk_path)
+        for plan in distribution_plan
+        if plan.destination_kind == "participant"
+    }
+    current_quarantine_destinations = {
+        plan.destination_disk_path
+        for plan in distribution_plan
+        if plan.destination_kind == "quarantine"
+    }
+
+    removed_count = 0
+    for photo_name in sorted(participant_photo_names):
+        quarantine_path = join_disk_path(
+            event_folder,
+            output_folders.quarantine_folder_name,
+            photo_name,
+        )
+        if quarantine_path in current_quarantine_destinations:
+            continue
+        try:
+            disk_client.delete_resource(quarantine_path, permanently=False)
+        except DiskApiError as exc:
+            if exc.status_code != 404:
+                raise
+        else:
+            removed_count += 1
+    return removed_count
+
+
+def _disk_file_name(disk_path: str) -> str:
+    """Return the final file-name segment from an absolute Yandex Disk path.
+
+    Args:
+        disk_path: Absolute Yandex Disk file path.
+
+    Returns:
+        Final path segment used as the event photo file name.
+    """
+
+    return disk_path.rstrip("/").split("/")[-1]
 
 
 def _remove_local_artifact(path: Path) -> None:

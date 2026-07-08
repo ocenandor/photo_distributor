@@ -341,13 +341,15 @@ def _load_image(image: str | Path | Any) -> Any:
                 f"Image file does not exist: {path}",
                 safe_message="Image file does not exist.",
             )
-        image_array = cv.imread(str(path))
-        if image_array is None:
+        try:
+            from photo_distribution_utils.image_files import ImageFileError, load_image_for_opencv
+
+            return load_image_for_opencv(path)
+        except ImageFileError as exc:
             raise FaceAnalysisError(
                 f"OpenCV could not read image file: {path}",
-                safe_message="OpenCV could not read image file.",
-            )
-        return image_array
+                safe_message=exc.safe_message(),
+            ) from exc
 
     if not hasattr(image, "shape"):
         raise FaceAnalysisError("Image must be a file path or an OpenCV/numpy image array.")
