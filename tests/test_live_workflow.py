@@ -32,6 +32,11 @@ VALID_IMAGE_BYTES = (
     b"\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01"
     b"\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+PARTICIPANT_ACCESS_READY_SUBJECT = "Фотодистрибьютор: доступ к Яндекс Диску готов"
+MANUAL_ACCESS_REQUIRED_SUBJECT = (
+    "Фотодистрибьютор: требуется ручная выдача доступа к Яндекс Диску"
+)
+DUPLICATE_PARTICIPANT_EMAIL_SUBJECT = "Фотодистрибьютор: повторный email участника"
 
 
 def test_run_live_event_creates_event_folder_before_polling(monkeypatch, tmp_path: Path) -> None:
@@ -113,9 +118,10 @@ def test_run_live_event_once_processes_email_and_new_event_photo(tmp_path: Path)
     assert mail_client.sent_messages == [
         (
             "participant@example.com",
-            "Photo distributor: Yandex Disk access is ready",
+            PARTICIPANT_ACCESS_READY_SUBJECT,
         )
     ]
+    assert "Вам открыт доступ на запись к общей папке события." in mail_client.sent_bodies[0]
     assert "https://disk.yandex.ru/client/disk/event" in mail_client.sent_bodies[0]
     assert disk_client.created_folders == ["/event/Pavel__output", "/event/quarantine"]
     assert disk_client.copied == [("/event/photo.jpg", "/event/Pavel__output/photo.jpg", True)]
@@ -179,7 +185,7 @@ def test_run_live_event_once_processes_disk_forms_export(tmp_path: Path) -> None
     assert mail_client.sent_messages == [
         (
             "diskparticipant@example.com",
-            "Photo distributor: Yandex Disk access is ready",
+            PARTICIPANT_ACCESS_READY_SUBJECT,
         )
     ]
     assert disk_client.copied == [("/event/photo.jpg", "/event/Pavel__output/photo.jpg", True)]
@@ -214,7 +220,7 @@ def test_run_live_event_once_continues_when_mail_fetch_fails(tmp_path: Path) -> 
     assert mail_client.sent_messages == [
         (
             "diskparticipant@example.com",
-            "Photo distributor: Yandex Disk access is ready",
+            PARTICIPANT_ACCESS_READY_SUBJECT,
         )
     ]
 
@@ -304,7 +310,7 @@ def test_run_live_event_once_deduplicates_processed_answer_and_cached_photo(tmp_
     assert mail_client.sent_messages == [
         (
             "participant@example.com",
-            "Photo distributor: Yandex Disk access is ready",
+            PARTICIPANT_ACCESS_READY_SUBJECT,
         )
     ]
 
@@ -339,9 +345,10 @@ def test_run_live_event_once_retries_when_access_grant_fails(tmp_path: Path) -> 
     assert mail_client.sent_messages == [
         (
             "admin@example.com",
-            "Photo distributor: manual Yandex Disk access required",
+            MANUAL_ACCESS_REQUIRED_SUBJECT,
         )
     ]
+    assert "Пожалуйста, выдайте доступ на редактирование вручную" in mail_client.sent_bodies[0]
     assert "https://disk.yandex.ru/client/disk/event" in mail_client.sent_bodies[0]
 
 
@@ -377,7 +384,7 @@ def test_run_live_event_once_sends_manual_alert_when_access_grant_times_out(
     assert mail_client.sent_messages == [
         (
             "admin@example.com",
-            "Photo distributor: manual Yandex Disk access required",
+            MANUAL_ACCESS_REQUIRED_SUBJECT,
         )
     ]
 
@@ -525,13 +532,14 @@ def test_grant_access_skips_duplicate_email_and_alerts_admin(tmp_path: Path) -> 
     assert mail_client.sent_messages == [
         (
             "shared@example.com",
-            "Photo distributor: Yandex Disk access is ready",
+            PARTICIPANT_ACCESS_READY_SUBJECT,
         ),
         (
             "admin@example.com",
-            "Photo distributor: duplicate participant email",
+            DUPLICATE_PARTICIPANT_EMAIL_SUBJECT,
         ),
     ]
+    assert "уже была попытка выдачи доступа" in mail_client.sent_bodies[1]
     assert runtime.access_handled_participant_emails == {"shared@example.com"}
     assert runtime.duplicate_access_alerted_source_ids == {"participant:2"}
 

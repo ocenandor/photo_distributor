@@ -9,6 +9,7 @@ from typing import Any, Sequence
 
 import cv2 as cv
 import numpy as np
+from loguru import logger
 
 from utils import redact_personal_data
 
@@ -222,11 +223,20 @@ class FaceAnalyzer:
             Runs local model inference through this analyzer.
         """
 
+        logger.info("Start matching: references={}, photos={}", len(reference_images), len(event_photos))
         reference_embeddings = self._compute_reference_embeddings(reference_images)
         event_faces_count, face_matches = self._analyze_event_photos(
             event_photos,
             reference_embeddings,
             similarity_threshold,
+        )
+
+        logger.info(
+            "Finish matching: reference_embeddings={}, photos={}, faces={}, matches={}",
+            len(reference_embeddings),
+            len(event_photos),
+            event_faces_count,
+            len(face_matches),
         )
 
         return FaceAnalysisStepResult(

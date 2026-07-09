@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from face_analysis import (
     EventPhotoForAnalysis,
     FaceAnalyzer,
@@ -33,6 +35,42 @@ def test_analyze_distribution_extracts_references_and_matches_event_faces(
     assert result.reference_embeddings[0].participant_id == 1
     assert result.face_matches[0].event_photo_id == 1
     assert result.face_matches[0].participant_id == 1
+
+
+def test_analyze_distribution_logs_matching_input_counts(tmp_path: Path) -> None:
+    reference_images = _reference_images(tmp_path)
+    event_photos = _event_photos(tmp_path)
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(message.record["message"]), format="{message}")
+
+    try:
+        FakeAnalyzer("models/face_detection_yunet.onnx").analyze_distribution(
+            reference_images,
+            event_photos,
+            0.5,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert "Start matching: references=1, photos=2" in messages
+
+
+def test_analyze_distribution_logs_matching_result_counts(tmp_path: Path) -> None:
+    reference_images = _reference_images(tmp_path)
+    event_photos = _event_photos(tmp_path)
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(message.record["message"]), format="{message}")
+
+    try:
+        FakeAnalyzer("models/face_detection_yunet.onnx").analyze_distribution(
+            reference_images,
+            event_photos,
+            0.5,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert "Finish matching: reference_embeddings=1, photos=2, faces=2, matches=1" in messages
 
 
 def test_analyze_distribution_respects_similarity_threshold(

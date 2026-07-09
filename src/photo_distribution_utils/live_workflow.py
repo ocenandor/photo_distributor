@@ -56,6 +56,11 @@ DEFAULT_EVENT_FOLDER_PREFIX = "event"
 DEFAULT_ACCESS_GRANT_TIMEOUT_SECONDS = 240
 DEFAULT_LIVE_STATUS_FILE = Path("data/live_status/live_event_status.json")
 NO_FORMS_JSON_SAFE_MESSAGE = "No JSON export files found in the Yandex Forms folder."
+PARTICIPANT_ACCESS_READY_SUBJECT = "Фотодистрибьютор: доступ к Яндекс Диску готов"
+MANUAL_ACCESS_REQUIRED_SUBJECT = (
+    "Фотодистрибьютор: требуется ручная выдача доступа к Яндекс Диску"
+)
+DUPLICATE_PARTICIPANT_EMAIL_SUBJECT = "Фотодистрибьютор: повторный email участника"
 
 
 @dataclass(frozen=True, repr=False)
@@ -838,19 +843,20 @@ def _send_manual_access_alert(
         return
     admin_email = getattr(mail_client.config, "admin_email", "")
     if not admin_email:
-        logger.warning("Manual access alert email skipped: admin email is not configured.")
+        logger.warning("Письмо оператору о ручной выдаче доступа пропущено: email администратора не настроен.")
         runtime.access_grant_alerted_source_ids.add(source_id)
         return
 
-    subject = "Photo distributor: manual Yandex Disk access required"
+    subject = MANUAL_ACCESS_REQUIRED_SUBJECT
     body = (
-        "Automatic Yandex Disk write-access grant failed or timed out.\n\n"
-        f"Form id: {runtime.form_id}\n"
-        f"Source id: {source_id}\n"
-        f"Event folder link: {event_folder_url}\n"
-        f"Participant email: {participant_email}\n"
-        f"Safe error: {exc.safe_message()}\n\n"
-        "Please grant write access manually in Yandex Disk."
+        "Автоматическая выдача доступа на запись к папке события в Яндекс Диске "
+        "не удалась или заняла слишком много времени.\n\n"
+        f"ID формы: {runtime.form_id}\n"
+        f"ID источника: {source_id}\n"
+        f"Ссылка на папку события: {event_folder_url}\n"
+        f"Email участника: {participant_email}\n"
+        f"Безопасное описание ошибки: {exc.safe_message()}\n\n"
+        "Пожалуйста, выдайте доступ на редактирование вручную в Яндекс Диске."
     )
     try:
         mail_client.send_message(
@@ -859,9 +865,9 @@ def _send_manual_access_alert(
             body=body,
         )
         runtime.access_grant_alerted_source_ids.add(source_id)
-        logger.warning("Manual access alert email sent.")
+        logger.warning("Письмо оператору о ручной выдаче доступа отправлено.")
     except Exception:
-        logger.warning("Manual access alert email could not be sent.")
+        logger.warning("Не удалось отправить письмо оператору о ручной выдаче доступа.")
 
 
 def _send_duplicate_access_request_alert(
@@ -888,18 +894,18 @@ def _send_duplicate_access_request_alert(
         return
     admin_email = getattr(mail_client.config, "admin_email", "")
     if not admin_email:
-        logger.warning("Duplicate access alert email skipped: admin email is not configured.")
+        logger.warning("Письмо оператору о повторном email пропущено: email администратора не настроен.")
         runtime.duplicate_access_alerted_source_ids.add(source_id)
         return
 
-    subject = "Photo distributor: duplicate participant email"
+    subject = DUPLICATE_PARTICIPANT_EMAIL_SUBJECT
     body = (
-        "A form answer used an email that already had an access-grant attempt.\n\n"
-        f"Form id: {runtime.form_id}\n"
-        f"Source id: {source_id}\n"
-        f"Participant email: {participant_email}\n\n"
-        "The live runner skipped a repeated Yandex Disk UI access grant for this email. "
-        "Treat this as a separate participant only for matching/references."
+        "В ответе формы указан email, для которого уже была попытка выдачи доступа.\n\n"
+        f"ID формы: {runtime.form_id}\n"
+        f"ID источника: {source_id}\n"
+        f"Email участника: {participant_email}\n\n"
+        "Повторная выдача доступа через UI Яндекс Диска для этого email пропущена. "
+        "Учитывайте эту заявку как отдельного участника только для распознавания и референсов."
     )
     try:
         mail_client.send_message(
@@ -908,9 +914,9 @@ def _send_duplicate_access_request_alert(
             body=body,
         )
         runtime.duplicate_access_alerted_source_ids.add(source_id)
-        logger.warning("Duplicate access alert email sent.")
+        logger.warning("Письмо оператору о повторном email отправлено.")
     except Exception:
-        logger.warning("Duplicate access alert email could not be sent.")
+        logger.warning("Не удалось отправить письмо оператору о повторном email.")
 
 
 def _send_participant_access_notification(
@@ -930,11 +936,11 @@ def _send_participant_access_notification(
         Sends one plain-text participant notification email.
     """
 
-    subject = "Photo distributor: Yandex Disk access is ready"
+    subject = PARTICIPANT_ACCESS_READY_SUBJECT
     body = (
-        "Write access to the event upload folder has been granted.\n\n"
-        f"Event folder link: {event_folder_url}\n\n"
-        "You can now open this link and upload event photos to the shared folder."
+        "Вам открыт доступ на запись к общей папке события.\n\n"
+        f"Ссылка на папку события: {event_folder_url}\n\n"
+        "Теперь вы можете открыть ссылку и загрузить фотографии события в общую папку."
     )
     try:
         mail_client.send_message(
@@ -942,9 +948,9 @@ def _send_participant_access_notification(
             subject=subject,
             body=body,
         )
-        logger.info("Participant access notification email sent.")
+        logger.info("Письмо участнику о доступе отправлено.")
     except Exception:
-        logger.warning("Participant access notification email could not be sent.")
+        logger.warning("Не удалось отправить письмо участнику о доступе.")
 
 
 def _form_attachments(message: MailMessage) -> tuple[EmailAttachment, ...]:
